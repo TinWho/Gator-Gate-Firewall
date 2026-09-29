@@ -1,7 +1,7 @@
 /*
  * Code Snippet:       Gator-Gate-Firewall for bbPress
  * Description:        Advanced per-forum content filtration, clipboard copy-paste baggage reduction.
- * Version:            0.0.4-Alpha
+ * Version:            0.1.4-Alpha
  * AUTHOR:             Tin Who (https://tinfoilwho.com)
  * License:            GPL-2.0-or-later
  *
@@ -10,9 +10,8 @@
  */
 
 
-
 if ( ! defined( 'ABSPATH' ) ) {
-    exit; // Block direct access
+    exit;
 }
 
 
@@ -22,10 +21,7 @@ SECTION 1: BACKEND FORUM ATTRIBUTES UI
 ============================================================================
 */
 
-// Register an independent Meta Box container for Forums
 add_action( 'add_meta_boxes', 'gator_gate_register_metabox' );
-
-// Hook directly into the absolute WordPress core Custom Post Type save hook
 add_action( 'save_post_forum', 'gator_gate_save_metabox_data', 10, 2 );
 
 
@@ -44,7 +40,6 @@ function gator_gate_register_metabox() {
 
 function gator_gate_render_metabox_content( $post ) {
 
-    // Nonce safety check token to protect form data packages
     wp_nonce_field(
         'gator_gate_secure_save_action',
         'gator_gate_secure_save_field'
@@ -52,9 +47,9 @@ function gator_gate_render_metabox_content( $post ) {
 
 
     /*
-    =========================================================================
-    GATOR-GATE PORT MAP
-    =========================================================================
+    ============================================================================
+    GATOR-GATE PORT DEFINITIONS
+    ============================================================================
     */
 
     $gator_gate_ports = [
@@ -64,7 +59,7 @@ function gator_gate_render_metabox_content( $post ) {
         'port_3' => 'PORT 3: VIDEOS ALLOWED',
         'port_4' => 'PORT 4: TABLES ALLOWED',
         'port_5' => 'PORT 5: COLOURS ALLOWED',
-        'port_6' => 'PORT 6: TEXT ALIGNMENT ALLOWED',
+        'port_6' => 'PORT 6: OTHER ALIGNMENT',
         'port_7' => 'PORT 7: FONTS & SIZES ALLOWED',
         'port_8' => 'PORT 8: PRESERVE PREFORMATTED TEXT',
         'port_9' => 'PORT 9: BYPASS FIREWALL (DISABLE ALL RULES)',
@@ -72,10 +67,31 @@ function gator_gate_render_metabox_content( $post ) {
     ];
 
 
-    echo '<p style="font-size:12px; color:#646970; margin-bottom:12px;">Toggle specific isolated firewall ports for this forum container:</p>';
+    echo '<p style="font-size:12px; color:#646970; margin-bottom:12px;">';
+    echo 'Toggle specific isolated firewall ports for this forum:';
+    echo '</p>';
+
+
+    /*
+    ============================================================================
+    CHECK WHETHER FIREWALL CONFIGURATION HAS EVER BEEN SAVED
+    ============================================================================
+    */
+
+    $gator_gate_configuration_saved = get_post_meta(
+        $post->ID,
+        '_gator_gate_configuration_saved',
+        true
+    );
+
+
+    /*
+    ============================================================================
+    PORT CHECKBOXES
+    ============================================================================
+    */
 
     echo '<div id="gator_gate_ui_wrapper">';
-
 
     foreach ( $gator_gate_ports as $key_id => $box_label ) {
 
@@ -86,34 +102,56 @@ function gator_gate_render_metabox_content( $post ) {
         );
 
 
-        echo '<p style="margin: 8px 0; line-height: 1.5;">';
+        /*
+        ========================================================================
+        DEFAULT STATE FOR UNSAVED CONFIGURATION
+        ========================================================================
+        *
+        * If this forum has never had a Gator-Gate configuration saved,
+        * Port 9 is displayed as active by default.
+        *
+        */
+
+        if (
+            ! $gator_gate_configuration_saved
+            && 'port_9' === $key_id
+        ) {
+
+            $is_checked = 1;
+        }
+
+
+        echo '<p style="margin:8px 0; line-height:1.5;">';
 
         echo '<label style="display:inline-flex; align-items:center; width:100%; cursor:pointer; font-weight:500;">';
 
-        echo '<input type="checkbox" name="gator_gate_' .
-            esc_attr( $key_id ) .
-            '" value="1" ' .
-            checked( 1, $is_checked, false ) .
-            ' style="margin:0 10px 0 0;" /> ';
+        echo '<input type="checkbox" '
+            . 'name="gator_gate_' . esc_attr( $key_id ) . '" '
+            . 'value="1" '
+            . checked( 1, $is_checked, false )
+            . ' style="margin:0 10px 0 0;" />';
 
-        echo '<span style="vertical-align:middle;">' .
-            esc_html( $box_label ) .
-            '</span>';
+        echo '<span>'
+            . esc_html( $box_label )
+            . '</span>';
 
         echo '</label>';
 
         echo '</p>';
     }
 
-
     echo '</div>';
 
 
     /*
-    =========================================================================
-    PER-FORUM SUBMISSION LIMIT
-    =========================================================================
+    ============================================================================
+    PER-FORUM MAXIMUM SUBMITTED CONTENT SIZE
+    ============================================================================
+    *
+    * Default: 0 characters = unlimited.
     */
+
+    $gator_gate_default_limit = 0;
 
     $gator_gate_submission_limit = get_post_meta(
         $post->ID,
@@ -122,86 +160,110 @@ function gator_gate_render_metabox_content( $post ) {
     );
 
 
-    // Existing forums with no saved value use the default of 5000
-    if ( $gator_gate_submission_limit === '' ) {
-        $gator_gate_submission_limit = 5000;
+    /*
+    * Empty meta means the forum has not yet been given a limit.
+    */
+
+    if ( '' === $gator_gate_submission_limit ) {
+
+        $gator_gate_submission_limit =
+            $gator_gate_default_limit;
     }
 
 
     echo '<div style="margin-top:15px; padding-top:12px; border-top:1px solid #dcdcde;">';
 
 
-    echo '<label style="display:block; font-size:12px; font-weight:600; margin-bottom:6px;">';
-    echo 'MAXIMUM SUBMISSION SIZE';
-    echo '</label>';
+    /*
+    ============================================================================
+    COMPACT CHARACTER-LIMIT CONTROL
+    ============================================================================
+    */
 
+    echo '<div style="display:flex; align-items:center; gap:7px;">';
 
-    echo '<input
-        type="number"
-        name="gator_gate_submission_limit"
-        value="' . esc_attr( $gator_gate_submission_limit ) . '"
-        min="1"
-        max="10000"
-        step="1"
-        inputmode="numeric"
-        style="width:80px;"
-        />';
+    echo '<input type="number" '
+        . 'name="gator_gate_submission_limit" '
+        . 'value="' . esc_attr( $gator_gate_submission_limit ) . '" '
+        . 'min="0" '
+        . 'step="100" '
+        . 'style="width:85px;" />';
 
-
-    echo '<span style="font-size:14px; color:#646970; margin-left:6px;">characters</span>';
-
-
-    echo '<p style="font-size:11px; color:#646970; margin:5px 0 0;">';
-    echo 'Allowed range: 1–10,000. Default: 5,000.';
-    echo '</p>';
-
+    echo '<span style="font-size:14px;">characters</span>';
 
     echo '</div>';
 
 
     /*
-    =========================================================================
-    ISOLATED BUTTON POSITIONED UNDER PORT 9
-    =========================================================================
+    ============================================================================
+    DESCRIPTION BELOW CONTROL
+    ============================================================================
+    */
+
+    echo '<p style="font-size:13px; color:#646970; margin:7px 0 0;">';
+    echo 'Maximum content size after Gator-Gate cleanup. 0 = unlimited.';
+    echo '</p>';
+
+    echo '</div>';
+
+
+    /*
+    ============================================================================
+    ISOLATED SAVE BUTTON
+    ============================================================================
     */
 
     echo '<div style="margin-top:15px; padding-top:12px; border-top:1px solid #dcdcde; text-align:right;">';
 
+    echo '<button type="submit" '
+        . 'name="gator_gate_isolated_save" '
+        . 'value="1" '
+        . 'class="button button-secondary button-large" '
+        . 'style="width:100%; text-align:center; background:#135e96; color:#fff; border-color:#135e96; font-weight:600;">';
 
-    echo '<button
-        type="submit"
-        name="gator_gate_isolated_save"
-        value="1"
-        class="button button-secondary button-large"
-        style="width:100%; text-align:center; background:#135e96; color:#fff; border-color:#135e96; font-weight:600;">
-        Update Firewall Configuration Only
-    </button>';
+    echo 'Update Firewall Configuration Only';
 
+    echo '</button>';
 
     echo '<p style="font-size:11px; color:#646970; margin:6px 0 0; text-align:center;">';
-    echo 'Updates ports instantly without modifying ambient post content text.';
+    echo 'Updates ports and submission limit without modifying post content.';
     echo '</p>';
-
 
     echo '</div>';
 }
 
 
+/*
+============================================================================
+SECTION 2: SAVE FIREWALL CONFIGURATION
+============================================================================
+*/
 
 function gator_gate_save_metabox_data( $post_id, $post ) {
 
-    // Only execute database updates if our custom firewall button was explicitly clicked
+    /*
+    ============================================================================
+    ONLY RUN WHEN OUR DEDICATED FIREWALL BUTTON WAS CLICKED
+    ============================================================================
+    */
+
     if (
-        ! isset( $_POST['gator_gate_isolated_save'] ) ||
-        '1' !== $_POST['gator_gate_isolated_save']
+        ! isset( $_POST['gator_gate_isolated_save'] )
+        || '1' !== $_POST['gator_gate_isolated_save']
     ) {
         return $post_id;
     }
 
 
+    /*
+    ============================================================================
+    NONCE VALIDATION
+    ============================================================================
+    */
+
     if (
-        ! isset( $_POST['gator_gate_secure_save_field'] ) ||
-        ! wp_verify_nonce(
+        ! isset( $_POST['gator_gate_secure_save_field'] )
+        || ! wp_verify_nonce(
             $_POST['gator_gate_secure_save_field'],
             'gator_gate_secure_save_action'
         )
@@ -210,10 +272,36 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
     }
 
 
-    if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+    /*
+    ============================================================================
+    AUTOSAVE PROTECTION
+    ============================================================================
+    */
+
+    if (
+        defined( 'DOING_AUTOSAVE' )
+        && DOING_AUTOSAVE
+    ) {
         return $post_id;
     }
 
+
+    /*
+    ============================================================================
+    REVISION PROTECTION
+    ============================================================================
+    */
+
+    if ( wp_is_post_revision( $post_id ) ) {
+        return $post_id;
+    }
+
+
+    /*
+    ============================================================================
+    PERMISSION CHECK
+    ============================================================================
+    */
 
     if ( ! current_user_can( 'edit_post', $post_id ) ) {
         return $post_id;
@@ -221,12 +309,13 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
 
 
     /*
-    =========================================================================
-    PORTS 1 - 9
-    =========================================================================
+    ============================================================================
+    SAVE PORT SETTINGS
+    ============================================================================
     */
 
     $gator_gate_keys = [
+
         'port_1',
         'port_2',
         'port_3',
@@ -235,7 +324,8 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
         'port_6',
         'port_7',
         'port_8',
-        'port_9'
+        'port_9',
+
     ];
 
 
@@ -245,8 +335,8 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
 
 
         if (
-            isset( $_POST[ $post_var_name ] ) &&
-            '1' === $_POST[ $post_var_name ]
+            isset( $_POST[ $post_var_name ] )
+            && '1' === $_POST[ $post_var_name ]
         ) {
 
             update_post_meta(
@@ -257,27 +347,20 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
 
         } else {
 
-            if (
-                get_post_meta(
-                    $post_id,
-                    '_gator_gate_' . $key_id,
-                    true
-                )
-            ) {
-
-                delete_post_meta(
-                    $post_id,
-                    '_gator_gate_' . $key_id
-                );
-            }
+            delete_post_meta(
+                $post_id,
+                '_gator_gate_' . $key_id
+            );
         }
     }
 
 
     /*
-    =========================================================================
-    SAVE PER-FORUM SUBMISSION LIMIT
-    =========================================================================
+    ============================================================================
+    SAVE PER-FORUM MAXIMUM SUBMITTED CONTENT SIZE
+    ============================================================================
+    *
+    * 0 = unlimited.
     */
 
     if ( isset( $_POST['gator_gate_submission_limit'] ) ) {
@@ -287,13 +370,15 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
         );
 
 
-        // Enforce hard limits server-side
+        /*
+        * Minimum: 0.
+        *
+        * 0 means unlimited.
+        */
+
         $submission_limit = max(
-            1,
-            min(
-                10000,
-                $submission_limit
-            )
+            0,
+            $submission_limit
         );
 
 
@@ -305,6 +390,28 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
     }
 
 
+    /*
+    ============================================================================
+    MARK CONFIGURATION AS EXPLICITLY SAVED
+    ============================================================================
+    *
+    * Once this marker exists, the administrator's individual port settings
+    * become authoritative.
+    *
+    * Until this marker exists:
+    *
+    * Port 9 = bypass
+    * Submission limit = 0 / unlimited
+    *
+    */
+
+    update_post_meta(
+        $post_id,
+        '_gator_gate_configuration_saved',
+        1
+    );
+
+
     return $post_id;
 }
 
@@ -312,77 +419,7 @@ function gator_gate_save_metabox_data( $post_id, $post ) {
 
 /*
 ============================================================================
-SECTION 2: SUBMISSION LIMIT ERROR DISPLAY
-============================================================================
-*/
-
-add_action(
-    'wp_footer',
-    'gator_gate_display_submission_limit_error',
-    999
-);
-
-
-function gator_gate_display_submission_limit_error() {
-
-    if ( ! is_user_logged_in() ) {
-        return;
-    }
-
-
-    $user_id = get_current_user_id();
-
-
-    $error_key = 'gator_gate_limit_error_' . $user_id;
-
-
-    $message = get_transient(
-        $error_key
-    );
-
-
-    if ( empty( $message ) ) {
-        return;
-    }
-
-
-    // Remove immediately so the message only appears once
-    delete_transient(
-        $error_key
-    );
-
-
-    ?>
-
-    <div
-        id="gator-gate-submission-error"
-        style="
-            position:fixed;
-            top:20px;
-            right:20px;
-            z-index:999999;
-            max-width:450px;
-            padding:15px 20px;
-            background:#fff;
-            border:2px solid #d63638;
-            color:#d63638;
-            box-shadow:0 4px 15px rgba(0,0,0,.2);
-            font-size:15px;
-            line-height:1.5;
-        "
-    >
-        <strong>Gator Gate:</strong>
-        <?php echo esc_html( $message ); ?>
-    </div>
-
-    <?php
-}
-
-
-
-/*
-============================================================================
-SECTION 3: CONTEXT-AWARE SECURITY FILTER ENGINE
+SECTION 3: CONTENT FILTER HOOKS
 ============================================================================
 */
 
@@ -415,20 +452,21 @@ add_filter(
 );
 
 
+
 function gator_gate_run_contextual_scrubber( $incoming_payload ) {
 
     $forum_id = 0;
 
 
     /*
-    =========================================================================
-    DETECT TARGET FORUM LOCATION CONTEXT
-    =========================================================================
+    ============================================================================
+    DETECT TARGET FORUM
+    ============================================================================
     */
 
     if (
-        function_exists( 'bbp_get_reply_forum_id' ) &&
-        bbp_is_reply_edit()
+        function_exists( 'bbp_get_reply_forum_id' )
+        && bbp_is_reply_edit()
     ) {
 
         $forum_id = bbp_get_reply_forum_id(
@@ -436,8 +474,8 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
         );
 
     } elseif (
-        function_exists( 'bbp_get_topic_forum_id' ) &&
-        bbp_is_topic_edit()
+        function_exists( 'bbp_get_topic_forum_id' )
+        && bbp_is_topic_edit()
     ) {
 
         $forum_id = bbp_get_topic_forum_id(
@@ -460,49 +498,46 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
             $_POST['bbp_topic_id']
         );
 
-        $forum_id = function_exists( 'bbp_get_topic_forum_id' )
-            ? bbp_get_topic_forum_id( $topic_id )
-            : 0;
-    }
+        if ( function_exists( 'bbp_get_topic_forum_id' ) ) {
 
-
-
-    /*
-    =========================================================================
-    PORT 9: ABSOLUTE FIREWALL BYPASS
-    =========================================================================
-    */
-
-    if ( $forum_id > 0 ) {
-
-        $is_bypass_active = get_post_meta(
-            $forum_id,
-            '_gator_gate_port_9',
-            true
-        );
-
-
-        if ( ! empty( $is_bypass_active ) ) {
-
-            return $incoming_payload .
-                "\n\n<!-- GATOR_GATE FIREWALL BYPASS: [Port 9 Active on Forum ID {$forum_id}]. Content unscrubbed. -->";
+            $forum_id = bbp_get_topic_forum_id(
+                $topic_id
+            );
         }
     }
 
 
 
     /*
-    =========================================================================
-    LOAD ACTIVE PORTS
-    =========================================================================
+    ============================================================================
+    CHECK WHETHER FIREWALL CONFIGURATION HAS EVER BEEN SAVED
+    ============================================================================
+    */
+
+    $gator_gate_configuration_saved = false;
+
+    if ( $forum_id > 0 ) {
+
+        $gator_gate_configuration_saved = get_post_meta(
+            $forum_id,
+            '_gator_gate_configuration_saved',
+            true
+        );
+    }
+
+
+
+    /*
+    ============================================================================
+    LOAD ACTIVE PORT SETTINGS
+    ============================================================================
     */
 
     $active_ports = [];
 
-
     if ( $forum_id > 0 ) {
 
-        for ( $i = 1; $i <= 8; $i++ ) {
+        for ( $i = 1; $i <= 9; $i++ ) {
 
             $active_ports[ 'port_' . $i ] = get_post_meta(
                 $forum_id,
@@ -516,7 +551,48 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
 
     /*
     ============================================================================
-    CAPTURE INITIAL COUNT BEFORE CLEANUP
+    PORT 9: BYPASS FORMATTING FIREWALL
+    ============================================================================
+    *
+    * Port 9 bypasses Gator-Gate formatting rules.
+    *
+    * DEFAULT:
+    * If this forum has never had a Gator-Gate configuration saved,
+    * Port 9 is automatically treated as active.
+    *
+    * The submission-size safeguard remains independent.
+    *
+    */
+
+    $is_bypass_active = false;
+
+    if ( $forum_id > 0 ) {
+
+        /*
+        * No configuration has ever been saved.
+        *
+        * Default to bypass mode.
+        */
+
+        if ( ! $gator_gate_configuration_saved ) {
+
+            $is_bypass_active = true;
+
+        } else {
+
+            $is_bypass_active = get_post_meta(
+                $forum_id,
+                '_gator_gate_port_9',
+                true
+            );
+        }
+    }
+
+
+
+    /*
+    ============================================================================
+    INITIAL CHARACTER COUNT
     ============================================================================
     */
 
@@ -526,27 +602,42 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
     );
 
 
+
     /*
     ============================================================================
-    DYNAMIC ATTRIBUTE BLACKLIST FILTER: STEP 1A
+    MAIN FIREWALL
     ============================================================================
     */
 
-    $attribute_blacklist = [
-        'data-src',
-        'data-scr',
-        'data-sizes',
-        'data-srcset',
-        'sizes',
-        'srcset',
-        'onclick',
-        'onload'
-    ];
+    if ( ! $is_bypass_active ) {
 
 
-    if ( ! empty( $attribute_blacklist ) ) {
+        /*
+        ========================================================================
+        ATTRIBUTE BLACKLIST
+        ========================================================================
+        */
 
-        // Decode entities like &quot; first
+        $attribute_blacklist = [
+
+            'data-src',
+            'data-scr',
+            'data-sizes',
+            'data-srcset',
+            'sizes',
+            'srcset',
+            'onclick',
+            'onload',
+
+        ];
+
+
+        /*
+        ========================================================================
+        DECODE HTML ENTITIES
+        ========================================================================
+        */
+
         $incoming_payload = html_entity_decode(
             $incoming_payload,
             ENT_QUOTES,
@@ -554,13 +645,18 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
         );
 
 
-        // Clean whitespace gaps inside tags, but explicitly ignore &nbsp;
+        /*
+        ========================================================================
+        NORMALISE WHITESPACE INSIDE HTML TAGS
+        ========================================================================
+        */
+
         $incoming_payload = preg_replace_callback(
             '/<[^>]+>/s',
             function( $tag_match ) {
 
                 return preg_replace(
-                    '/[^\S\x{00A0}]+|[\r\n\t]+/u',
+                    '/\s+/',
                     ' ',
                     $tag_match[0]
                 );
@@ -568,6 +664,12 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
             $incoming_payload
         );
 
+
+        /*
+        ========================================================================
+        BUILD ATTRIBUTE PATTERN
+        ========================================================================
+        */
 
         $attr_pattern = implode(
             '|',
@@ -578,407 +680,414 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
         );
 
 
-        // Strip quoted attributes
+        /*
+        ========================================================================
+        REMOVE QUOTED ATTRIBUTES
+        ========================================================================
+        */
+
         $incoming_payload = preg_replace(
-            '/\s+(?:' . $attr_pattern . ')\s*=\s*(?:"[^"]*"|\'[^\']*\')/is',
+            '/\s+(?:'
+            . $attr_pattern
+            . ')\s*=\s*(?:"[^"]*"|\'[^\']*\')/is',
             '',
             $incoming_payload
         );
 
 
-        // Strip curly-quoted attributes
+        /*
+        ========================================================================
+        REMOVE SMART-QUOTED ATTRIBUTES
+        ========================================================================
+        */
+
         $incoming_payload = preg_replace(
-            '/\s+(?:' . $attr_pattern . ')\s*=\s*(?:[”’][^”’]*[”’])/ius',
+            '/\s+(?:'
+            . $attr_pattern
+            . ')\s*=\s*(?:[”’][^”’]*[”’])/ius',
             '',
             $incoming_payload
         );
 
 
-        // Strip unquoted attributes
+        /*
+        ========================================================================
+        REMOVE UNQUOTED ATTRIBUTES
+        ========================================================================
+        */
+
         $incoming_payload = preg_replace(
-            '/\s+(?:' . $attr_pattern . ')\s*=\s*[^[:space:]>]+/i',
+            '/\s+(?:'
+            . $attr_pattern
+            . ')\s*=\s*[^[:space:]>]+/i',
             '',
             $incoming_payload
         );
-    }
 
 
 
-    /*
-    ============================================================================
-    MASTER WHITELIST FILTER: STEP 1B
-    ============================================================================
-    */
+        /*
+        ========================================================================
+        MASTER WHITELIST - port controls can apply additional filtering and granular removal
+        ========================================================================
+        */
 
-    $master_whitelist = [
-        '<p>',
-        '<br>',
-        '<a>',
-        '<span>',
-        '<em>',
-        '<strong>',
-        '<h1>',
-        '<h2>',
-        '<h3>',
-        '<h4>',
-        '<h5>',
-        '<h6>',
-        '<ul>',
-        '<ol>',
-        '<li>',
-        '<img>',
-        '<picture>',
-        '<source>',
-        '<table>',
-        '<thead>',
-        '<tbody>',
-        '<tr>',
-        '<th>',
-        '<td>',
-        '<pre>',
-        '<code>',
-    ];
+        $master_whitelist = [
+
+            '<p>',
+            '<br>',
+            '<a>',
+            '<span>',
+            '<em>',
+            '<strong>',
+
+            '<h1>',
+            '<h2>',
+            '<h3>',
+            '<h4>',
+            '<h5>',
+            '<h6>',
+
+            '<ul>',
+            '<ol>',
+            '<li>',
+
+            '<img>',
+            '<picture>',
+            '<source>',
+            '<iframe>',
+            
+
+            '<table>',
+            '<thead>',
+            '<tbody>',
+            '<tr>',
+            '<th>',
+            '<td>',
+
+            '<pre>',
+            '<code>',
+
+        ];
 
 
-    // Convert layout summary divs to regular paragraphs
+        /*
+        ========================================================================
+        CONVERT SUMMARY DIVS BEFORE STRIP_TAGS
+        ========================================================================
+        */
+
+        $incoming_payload = preg_replace(
+            '/<div([^>]*?)class="[^"]*summary[^"]*"[^>]*>(.*?)<\/div>/is',
+            '<p>$2</p>',
+            $incoming_payload
+        );
+
+
+        /*
+        ========================================================================
+        APPLY BASELINE WHITELIST
+        ========================================================================
+        */
+
+        $incoming_payload = strip_tags(
+            $incoming_payload,
+            implode(
+                '',
+                $master_whitelist
+            )
+        );
+
+
+
+        /*
+        ========================================================================
+        PORT 1: HEADINGS WITH ALIGNMENT & LISTS
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_1'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/<\/?(h[1-6]|ul|ol|li)[^>]*>/i',
+                '',
+                $incoming_payload
+            );
+        }
+
+
+
+        /*
+        ========================================================================
+        PORT 2: IMAGES
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_2'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/<(img|picture|source)[^>]*>|<\/(picture|source)>/i',
+                '',
+                $incoming_payload
+            );
+
+        } else {
+
+            $incoming_payload = preg_replace(
+                '/\s*(srcset|data-srcset|sizes|data-sizes|media)="[^"]*"/i',
+                '',
+                $incoming_payload
+            );
+
+            $incoming_payload = preg_replace(
+                '/<\/?(picture|source)[^>]*>/i',
+                '',
+                $incoming_payload
+            );
+        }
+
+
+
+ // ========================================================================
+// PORT 3: VIDEOS & VIDEO PROVIDERS
+// ========================================================================
+
+$gator_gate_video_whitelist = array(
+    'youtube.com',
+    'youtu.be',
+    'youtube-nocookie.com',
+    'vimeo.com',
+);
+
+if ( empty( $active_ports['port_3'] ) ) {
+
+    // --------------------------------------------------------------------
+    // PORT 3 OFF
+    // Remove ALL iframes.
+    // Remove ALL embed shortcodes.
+    // --------------------------------------------------------------------
+
     $incoming_payload = preg_replace(
-        '/<div([^>]*?)class="[^"]*summary[^"]*"[^>]*>(.*?)<\/div>/is',
-        '<p>$2</p>',
-        $incoming_payload
-    );
-
-
-    // Execute absolute baseline whitelist tag stripping layer
-    $incoming_payload = strip_tags(
-        $incoming_payload,
-        implode( '', $master_whitelist )
-    );
-
-
-    /*
-    ============================================================================
-    PORT PROCESSING PIPELINE
-    ============================================================================
-    */
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 1 MODULE: HEADINGS WITH ALIGNMENT & LISTS
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_1'] ) ) {
-
-        // Strip headings completely if Port 1 is unchecked
-        $incoming_payload = preg_replace(
-            '/<(h[1-6])[^>]*>|<\/(h[1-6])>/i',
-            '',
-            $incoming_payload
-        );
-
-
-        // Strip lists completely if Port 1 is unchecked
-        $incoming_payload = preg_replace(
-            '/<\/?(ul|ol|li)[^>]*>/i',
-            '',
-            $incoming_payload
-        );
-
-    } else {
-
-        // Headings, heading alignment and lists are allowed.
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 2 MODULE: IMAGES
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_2'] ) ) {
-
-        // Strip images completely if Port 2 is unchecked
-        $incoming_payload = preg_replace(
-            '/<(img|picture|source)[^>]*>|<\/(picture|source)>/i',
-            '',
-            $incoming_payload
-        );
-
-    } else {
-
-        // Existing image cleanup retained
-        $incoming_payload = preg_replace(
-            '/\s*(srcset|data-srcset|sizes|data-sizes|media)="[^"]*"/i',
-            '',
-            $incoming_payload
-        );
-
-
-        // Remove picture/source wrappers after cleanup
-        $incoming_payload = preg_replace(
-            '/<\/?(picture|source)[^>]*>/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 3 MODULE: VIDEO EMBED SHORTCODE
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_3'] ) ) {
-
-        // Strip video shortcodes completely if Port 3 is unchecked
-        $incoming_payload = preg_replace(
-            '/\[embed\b[^\]]*\](.*?)\[\/embed\]/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 4 MODULE: TABLES
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_4'] ) ) {
-
-        // Strip tables completely if Port 4 is unchecked
-        $incoming_payload = preg_replace(
-            '/<(table|thead|tbody|tr|th|td)[^>]*>|<\/(table|thead|tbody|tr|th|td)>/i',
-            '',
-            $incoming_payload
-        );
-
-    } else {
-
-        // Standardise tables if Port 4 is checked
-        $incoming_payload = preg_replace(
-            '/<(table|thead|tbody|tr|th|td)[^>]*>/i',
-            '<$1>',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 5 MODULE: COLOURS
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_5'] ) ) {
-
-        // Strip colours and background-colors globally
-        $incoming_payload = preg_replace(
-            '/\b(color|background-color)\s*:\s*[^;"]+;?/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 6 MODULE: TEXT ALIGNMENT
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_6'] ) ) {
-
-        // Process paragraphs intelligently
-        $incoming_payload = preg_replace_callback(
-            '/<p([^>]*?)>(.*?)<\/p>/is',
-            function( $matches ) {
-
-                $attributes = $matches[1];
-                $content    = $matches[2];
-
-
-                // Preserve alignment around videos and images
-                if (
-                    stripos( $content, '[embed' ) !== false ||
-                    preg_match( '/<img\b/i', $content )
-                ) {
-
-                    return $matches[0];
-                }
-
-
-                // Strip alignment from normal paragraphs
-                $clean_attributes = preg_replace(
-                    '/\btext-align\s*:\s*[^;"]+;?/i',
-                    '',
-                    $attributes
-                );
-
-
-                return '<p' .
-                    $clean_attributes .
-                    '>' .
-                    $content .
-                    '</p>';
-            },
-            $incoming_payload
-        );
-
-
-        // Strip text-align from other non-heading/non-paragraph elements
-        $incoming_payload = preg_replace(
-            '/<(?!h[1-6]\b|p\b)[a-z1-6]+[^>]*?\K\btext-align\s*:\s*[^;"]+;?/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 7 MODULE: FONTS FAMILY & SIZES
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_7'] ) ) {
-
-        // Strip custom font families, weights, styles and sizing
-        $incoming_payload = preg_replace(
-            '/\b(font-family|font-size|font-weight|font-style)\s*:[^;]+;?/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ---------------------------------------------------------------------------
-    PORT 8 MODULE: PREFORMATTED TEXT
-    ---------------------------------------------------------------------------
-    */
-
-    if ( empty( $active_ports['port_8'] ) ) {
-
-        // Strip preformatted/code tags if Port 8 is unchecked
-        $incoming_payload = preg_replace(
-            '/<\/?(pre|code)[^>]*>/i',
-            '',
-            $incoming_payload
-        );
-    }
-
-
-
-    /*
-    ============================================================================
-    UTILITY CLEANUP LAYER
-    ============================================================================
-    */
-
-    // Clean empty style attributes left behind by Port 5 or Port 7
-    $incoming_payload = preg_replace(
-        '/\s+style=["\']\s*;?\s*["\']/i',
+        '/<iframe\b[^>]*>.*?<\/iframe>/is',
         '',
         $incoming_payload
     );
 
-
-
-    /*
-    ============================================================================
-    FINAL CLEANED SUBMISSION SIZE CHECK
-    ============================================================================
-    */
-
-    // Default limit
-    $gator_gate_submission_limit = 5000;
-
-
-    // Load this forum's saved limit
-    if ( $forum_id > 0 ) {
-
-        $saved_submission_limit = get_post_meta(
-            $forum_id,
-            '_gator_gate_submission_limit',
-            true
-        );
-
-
-        if ( $saved_submission_limit !== '' ) {
-
-            $gator_gate_submission_limit = max(
-                1,
-                min(
-                    10000,
-                    absint( $saved_submission_limit )
-                )
-            );
-        }
-    }
-
-
-    /*
-    -------------------------------------------------------------------------
-    COUNT THE CLEANED SUBMISSION
-    -------------------------------------------------------------------------
-    */
-
-    $current_submission_length = mb_strlen(
-        $incoming_payload,
-        'UTF-8'
+    $incoming_payload = preg_replace(
+        '/\[embed\b[^\]]*\].*?\[\/embed\]/is',
+        '',
+        $incoming_payload
     );
 
+} else {
 
-    /*
-    -------------------------------------------------------------------------
-    BLOCK IF CLEANED SUBMISSION EXCEEDS FORUM LIMIT
-    -------------------------------------------------------------------------
-    */
+    // --------------------------------------------------------------------
+    // PORT 3 ON
+    // Only allow iframes and embeds from approved video providers.
+    // --------------------------------------------------------------------
 
-    if (
-        $current_submission_length >
-        $gator_gate_submission_limit
-    ) {
+    // Check iframe src against the video whitelist.
+    $incoming_payload = preg_replace_callback(
+        '/<iframe\b[^>]*\bsrc\s*=\s*([\'"])(.*?)\1[^>]*>.*?<\/iframe>/is',
+        function ( $match ) use ( $gator_gate_video_whitelist ) {
 
-        if ( is_user_logged_in() ) {
+            $src = trim( $match[2] );
 
-            set_transient(
-                'gator_gate_limit_error_' . get_current_user_id(),
-                sprintf(
-                    'Your cleaned submission is too long. Maximum allowed: %s characters. Your cleaned submission: %s characters.',
-                    number_format_i18n(
-                        $gator_gate_submission_limit
-                    ),
-                    number_format_i18n(
-                        $current_submission_length
-                    )
-                ),
-                60
+            foreach ( $gator_gate_video_whitelist as $video_domain ) {
+
+                if ( preg_match(
+                    '~^(?:https?:)?//(?:www\.)?' .
+                    preg_quote( $video_domain, '~' ) .
+                    '(/|$)~i',
+                    $src
+                ) ) {
+                    return $match[0];
+                }
+            }
+
+            // Not an approved video provider.
+            return '';
+        },
+        $incoming_payload
+    );
+
+    // Check [embed] URL against the same video whitelist.
+    $incoming_payload = preg_replace_callback(
+        '/\[embed\b[^\]]*\]\s*(.*?)\s*\[\/embed\]/is',
+        function ( $match ) use ( $gator_gate_video_whitelist ) {
+
+            $url = trim( $match[1] );
+
+            foreach ( $gator_gate_video_whitelist as $video_domain ) {
+
+                if ( preg_match(
+                    '~^(?:https?:)?//(?:www\.)?' .
+                    preg_quote( $video_domain, '~' ) .
+                    '(/|$)~i',
+                    $url
+                ) ) {
+                    // Normalise protocol-relative URLs.
+                    if ( strpos( $url, '//' ) === 0 ) {
+                        $url = 'https:' . $url;
+                    }
+
+                    return preg_replace(
+                        '/(\[embed\b[^\]]*\]).*?(\[\/embed\])/is',
+                        '$1' . $url . '$2',
+                        $match[0]
+                    );
+                }
+            }
+
+            // Not an approved video provider.
+            return '';
+        },
+        $incoming_payload
+    );
+}
+              /*
+        ========================================================================
+        PORT 4: TABLES
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_4'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/<\/?(table|thead|tbody|tr|th|td)[^>]*>/i',
+                '',
+                $incoming_payload
+            );
+
+        } else {
+
+            $incoming_payload = preg_replace(
+                '/<(table|thead|tbody|tr|th|td)[^>]*>/i',
+                '<$1>',
+                $incoming_payload
             );
         }
 
 
-        // Stop the submission. Nothing is saved.
-        return '';
+
+        /*
+        ========================================================================
+        PORT 5: COLOURS
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_5'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/\bcolor\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+
+            $incoming_payload = preg_replace(
+                '/\bbackground-color\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+        }
+
+
+
+        /*
+        ========================================================================
+        PORT 6: TEXT ALIGNMENT
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_6'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/\btext-align\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+        }
+
+
+
+        /*
+        ========================================================================
+        PORT 7: FONTS & SIZES
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_7'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/\bfont-family\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+
+            $incoming_payload = preg_replace(
+                '/\bfont-size\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+
+            $incoming_payload = preg_replace(
+                '/\bfont-weight\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+
+            $incoming_payload = preg_replace(
+                '/\bfont-style\s*:\s*[^;"]+;?/i',
+                '',
+                $incoming_payload
+            );
+        }
+
+
+
+        /*
+        ========================================================================
+        PORT 8: PREFORMATTED TEXT
+        ========================================================================
+        */
+
+        if ( empty( $active_ports['port_8'] ) ) {
+
+            $incoming_payload = preg_replace(
+                '/<\/?(pre|code)[^>]*>/i',
+                '',
+                $incoming_payload
+            );
+
+        } else {
+
+            $incoming_payload = preg_replace(
+                '/<(pre|code)[^>]*>/i',
+                '<$1>',
+                $incoming_payload
+            );
+        }
+
+
+
+        /*
+        ========================================================================
+        FINAL EMPTY STYLE CLEANUP
+        ========================================================================
+        */
+
+        $incoming_payload = preg_replace(
+            '/\s+style=["\']\s*;?\s*["\']/i',
+            '',
+            $incoming_payload
+        );
     }
 
 
 
     /*
     ============================================================================
-    FINAL METRICS AUDIT TRACE
+    FINAL CHARACTER COUNT
     ============================================================================
     */
 
@@ -989,21 +1098,142 @@ function gator_gate_run_contextual_scrubber( $incoming_payload ) {
 
 
     $vaporised_bytes =
-        $count_pre_firewall -
-        $count_post_firewall;
+        $count_pre_firewall
+        - $count_post_firewall;
+
 
 
     /*
-    -------------------------------------------------------------------------
-    GATOR-GATE AUDIT COMMENT
-    -------------------------------------------------------------------------
+    ============================================================================
+    PER-FORUM MAXIMUM SUBMITTED CONTENT SIZE
+    ============================================================================
+    *
+    * Default: 0 = unlimited.
+    *
+    * Port 9 bypasses formatting rules but the submission-size safeguard
+    * remains independently active when a non-zero limit is configured.
+    *
+    */
+
+    $gator_gate_default_limit = 0;
+
+    $gator_gate_submission_limit = '';
+
+
+    if ( $forum_id > 0 ) {
+
+        $gator_gate_submission_limit = get_post_meta(
+            $forum_id,
+            '_gator_gate_submission_limit',
+            true
+        );
+    }
+
+
+    /*
+    ============================================================================
+    DEFAULT LIMIT
+    ============================================================================
+    *
+    * Empty means no explicit forum limit has been saved.
+    *
+    * 0 = unlimited.
+    *
+    */
+
+    if ( '' === $gator_gate_submission_limit ) {
+
+        $gator_gate_submission_limit =
+            $gator_gate_default_limit;
+    }
+
+
+    $gator_gate_submission_limit = absint(
+        $gator_gate_submission_limit
+    );
+
+
+
+    /*
+    ============================================================================
+    FINAL SIZE CHECK
+    ============================================================================
+    *
+    * A limit of 0 means unlimited.
+    *
+    */
+
+    $gator_gate_final_size = mb_strlen(
+        $incoming_payload,
+        'UTF-8'
+    );
+
+
+    if (
+        $gator_gate_submission_limit > 0
+        && $gator_gate_final_size > $gator_gate_submission_limit
+    ) {
+
+        wp_die(
+
+            '<h1>Gator-Gate Submission Limit</h1>'
+
+            . '<p>Your submission is too large for this forum.</p>'
+
+            . '<p><strong>Maximum:</strong> '
+            . esc_html(
+                number_format_i18n(
+                    $gator_gate_submission_limit
+                )
+            )
+            . ' characters</p>'
+
+            . '<p><strong>Your cleaned submission:</strong> '
+            . esc_html(
+                number_format_i18n(
+                    $gator_gate_final_size
+                )
+            )
+            . ' characters</p>'
+
+            . '<p>Please remove some content and try again.</p>',
+
+            'Gator-Gate Submission Limit',
+
+            [
+                'response'  => 413,
+                'back_link' => true,
+            ]
+        );
+    }
+
+
+
+    /*
+    ============================================================================
+    DEBUG AUDIT TRACE
+    ============================================================================
     */
 
     $incoming_payload .=
-        "\n\n<!-- GATOR_GATE FIREWALL [Forum:ID {$forum_id}]: [Before: {$count_pre_firewall} chars] -> [After: {$count_post_firewall} chars]. Purged {$vaporised_bytes} formatting bytes. -->";
 
+        "\n\n<!-- GATOR_GATE FIREWALL "
+        . "[Forum:ID {$forum_id}]: "
+        . "[Before: {$count_pre_firewall} chars] "
+        . "-> [After: {$count_post_firewall} chars]. "
+        . "Purged {$vaporised_bytes} formatting bytes. "
+        . "-->";
+
+
+
+    /*
+    ============================================================================
+    RETURN CLEANED CONTENT
+    ============================================================================
+    */
 
     return $incoming_payload;
 }
 
-// end
+
+// END GATOR-GATE
